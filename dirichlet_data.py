@@ -11,7 +11,8 @@ import pandas as pd
 from collections import Counter
 from copy import deepcopy
 import dataset as local_datasets
-from datasets import load_dataset, tqdm
+from datasets import load_dataset
+from tqdm import tqdm
 
 import numpy as np
 import matplotlib.pyplot as plt

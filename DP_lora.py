@@ -22,10 +22,10 @@ from torchsummary import summary
 from tensorboardX import SummaryWriter
 from dirichlet_data import data_from_dirichlet
 from torch.autograd import Variable
-from optimizer.Nesterov import Nesterov
+# # from optimizer.Nesterov import Nesterov
 from sam import SAM
 # from DP_SAM import DP_SAM
-from optimizer import LESAM, SAMS, SAMC
+# # from optimizer import LESAM, SAMS, SAMC
 # from utils.autograd_hacks import *
 from models.resnet import ResNet18, ResNet50, ResNet10
 from models.resnet_bn import ResNet18BN, ResNet50BN, ResNet10BN, ResNet34BN
@@ -99,6 +99,11 @@ parser.add_argument('--freeze', default=0, type=int, help='# batch_size')
 parser.add_argument('--K', default=20, type=int, help='#workers')
 parser.add_argument("--ls_sigma2", type=float, default=0.01)
 parser.add_argument("--la_filter", type=int, default=1, help="1: apply LA-LoRA Gaussian low-pass filter to noisy LoRA gradients; 0: disable")
+parser.add_argument("--smoke_only",
+    type=int,
+    default=0,
+    help="Stop after the first federated round without evaluation",
+)
 
 args = parser.parse_args()
 gpu_idx = args.gpu
@@ -236,9 +241,9 @@ def get_data_loader_test(data_name):
 
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
-        batch_size=200,
+        batch_size=16,
         shuffle=False,
-        num_workers=4)
+        num_workers=0)
     return test_loader
 
 
@@ -868,12 +873,24 @@ class DataWorker(object):
         self.gamma = args.gamma
         self.dp_clip = 10
         self.R=1
+        self.data_name = data_name
 
+    # def data_id_loader(self, index):
+    #     '''
+    #     在每轮的开始，该工人装载数据集，以充当被激活的第index个客户端
+    #     '''
+    #     self.data_iterator = get_data_loader(index, self.data_idx, batch_size, data_name)
+
+    # 修复当前的 Ray DataWorker 序列化过大问题
     def data_id_loader(self, index):
-        '''
-        在每轮的开始，该工人装载数据集，以充当被激活的第index个客户端
-        '''
-        self.data_iterator = get_data_loader(index, self.data_idx, batch_size, data_name)
+        from ray_worker_loader import get_data_loader
+
+        self.data_iterator = get_data_loader(
+            index,
+            self.data_idx,
+            self.batch_size,
+            self.data_name,
+        )
 
     def state_id_loader(self, index):
         '''
@@ -1132,36 +1149,39 @@ class DataWorker(object):
 
                 data = data.to(device)
                 target = target.to(device)
+
+                if step < 2:
+                    before_lora = {
+                        name: param.detach().clone()
+                        for name, param in self.model.named_parameters()
+                        if is_lora_A_param(name) or is_lora_B_param(name)
+                    }
+
+                
                 self.optimizer.zero_grad(set_to_none=True)
-                output = self.model(data)
-                loss = self.criterion(output, target.long())
-                loss.backward()
 
                 if args.privacy == 1:
-                    layer_clip_norms = []
-                    for name, param in self.model.named_parameters():
-                        if param.grad is None:
-                            continue
-                        layer_clip_norms.append(torch.norm(param.grad.detach(), 2).item())
+                    # Import inside the Ray worker to avoid capturing
+                    # unnecessary objects during actor serialization.
+                    from dp_per_sample import dp_backward
 
-                    if len(layer_clip_norms) > 0:
-                        median_value = statistics.median(layer_clip_norms)
-                        args.C = min(float(median_value), 0.4)
+                    # Per-sample clipping, aggregation and Gaussian noise.
+                    # Use a fixed clipping threshold C.
+                    loss = dp_backward(
+                        model=self.model,
+                        inputs=data,
+                        targets=target.long(),
+                        criterion=self.criterion,
+                        max_grad_norm=args.C,
+                        noise_multiplier=args.dp_sigma,
+                    )
 
-                    for name, param in self.model.named_parameters():
-                        if param.grad is None:
-                            continue
-                        norm_value = torch.norm(param.grad.detach(), 2)
-                        clip_coef = min(1.0, float(args.C / (norm_value.item() + 1e-12)))
-                        param.grad.mul_(clip_coef)
-                        noise = torch.normal(
-                            mean=0.0,
-                            std=args.dp_sigma * args.C / args.batch_size,
-                            size=param.grad.shape,
-                            device=param.grad.device,
-                            dtype=param.grad.dtype,
-                        )
-                        param.grad.add_(noise)
+                else:
+                    # Ordinary non-private training.
+                    output = self.model(data)
+                    loss = self.criterion(output, target.long())
+                    loss.backward()
+
 
                 # LA-LoRA filter：只对 LoRA A/B 的“已加噪梯度”做固定 Gaussian 低通滤波。
                 # 这是 DP 后处理，不改变隐私机制；--la_filter 0 可关闭，用于 LA-LoRA(-filter) 消融。
@@ -1170,8 +1190,55 @@ class DataWorker(object):
                         if param.grad is not None and (is_lora_A_param(name) or is_lora_B_param(name)):
                             param.grad.data = gaussian_lowpass_lora_grad(param.grad.data, name)
 
+
                 self.optimizer.step()
+
+                if step < 2:
+                    a_changes = []
+                    b_changes = []
+
+                    for name, param in self.model.named_parameters():
+                        if name not in before_lora:
+                            continue
+
+                        change = (
+                            param.detach() - before_lora[name]
+                        ).abs().max().item()
+
+                        if is_lora_A_param(name):
+                            a_changes.append(change)
+
+                        elif is_lora_B_param(name):
+                            b_changes.append(change)
+
+                    a_max = max(a_changes, default=0.0)
+                    b_max = max(b_changes, default=0.0)
+
+                    print(
+                        f"[CHECK] Step {step}: "
+                        f"update_B={update_B}, "
+                        f"max_dA={a_max:.8f}, "
+                        f"max_dB={b_max:.8f}",
+                        flush=True,
+                    )
+
+                    if update_B:
+                        assert a_max == 0.0, (
+                            "ERROR: A changed during B-only update!"
+                        )
+                        assert b_max > 0.0, (
+                            "ERROR: B did not update!"
+                        )
+                    else:
+                        assert b_max == 0.0, (
+                            "ERROR: B changed during A-only update!"
+                        )
+                        assert a_max > 0.0, (
+                            "ERROR: A did not update!"
+                        )
+
                 step += 1
+
 
             if step >= args.K:
                 break
@@ -1180,6 +1247,18 @@ class DataWorker(object):
         delta_w = {k: v.cpu() for k, v in self.model.state_dict().items()}
         for k, v in self.model.state_dict().items():
             delta_w[k] = v.cpu() - weights[k]
+
+        # Diagnostic: check whether LoRA A/B and classifier changed.
+        for tag in ("lora_A", "lora_B", "head"):
+            norms = [
+                torch.linalg.vector_norm(delta.float()).item()
+                for name, delta in delta_w.items()
+                if tag in name
+            ]
+
+            value = max(norms) if norms else "NOT_FOUND"
+            print(f"[LA-LoRA DEBUG] {tag}: max_delta_norm={value}")
+            
         return delta_w
 
     def update_FFA_LoRA(self, weights, E, index, lr):
@@ -1645,16 +1724,61 @@ if __name__ == "__main__":
                 else:
                     print("training {}".format(name))
 
-    if args.CNN == 'swin_tiny':
-        if args.weights != "":
-            assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
-            weights_dict = torch.load('swin_tiny_patch4_window7_224.pth', map_location=device)["model"]
-            # 删除有关分类类别的权重
-            for k in list(weights_dict.keys()):
-                if "head" in k:
-                    del weights_dict[k]
-            print(model.load_state_dict(weights_dict, strict=False))
+    # if args.CNN == 'swin_tiny':
+    #     if args.weights != "":
+    #         assert os.path.exists(args.weights), "weights file: '{}' not exist.".format(args.weights)
+    #         weights_dict = torch.load('swin_tiny_patch4_window7_224.pth', map_location=device)["model"]
+    #         # 删除有关分类类别的权重
+    #         for k in list(weights_dict.keys()):
+    #             if "head" in k:
+    #                 del weights_dict[k]
+    #         print(model.load_state_dict(weights_dict, strict=False))
 
+
+    if args.CNN == "swin_tiny":
+        if args.weights:
+            assert os.path.isfile(args.weights), (
+                f"Pretrained weights not found: {args.weights}"
+            )
+
+            # Only load checkpoints downloaded from a trusted source.
+            checkpoint = torch.load(
+                args.weights,
+                map_location="cpu",
+                weights_only=False,
+            )
+
+            weights_dict = checkpoint["model"]
+
+            # ImageNet-1K: 1000 classes
+            # CIFAR-100: 100 classes
+            weights_dict = {
+                k: v for k, v in weights_dict.items()
+                if not k.startswith("head.")
+                and not k.endswith(".attn_mask")
+            }   
+
+            load_result = model.load_state_dict(
+                weights_dict,
+                strict=False,
+            )
+
+            print("Pretrained weights:", args.weights)
+            print("Missing keys:", load_result.missing_keys)
+            print("Unexpected keys:", load_result.unexpected_keys)
+
+            expected_missing = {"head.weight", "head.bias"}
+
+            assert set(load_result.missing_keys) == expected_missing, (
+                f"Unexpected missing parameters: "
+                f"{load_result.missing_keys}"
+            )
+            assert not load_result.unexpected_keys, (
+                f"Unexpected checkpoint parameters: "
+                f"{load_result.unexpected_keys}"
+            )
+
+            print("[SUCCESS] Swin-Tiny backbone loaded correctly.")
 
     if args.CNN == 'swin_small':
         if args.weights != "":
@@ -1775,8 +1899,17 @@ if __name__ == "__main__":
         end_time1 = time.time()
         #print(epochidx, '    ', end_time1 - time3)
         print(epochidx, '    ', end_time1 - start_time1)
+        if args.smoke_only == 1:
+            print(
+                "[SMOKE TEST] First federated round completed. "
+                "Evaluation and model saving skipped.",
+                flush=True,
+            )
+            writer.close()
+            ray.shutdown()
+            raise SystemExit(0)
 
-        if epochidx % args.preprint == 0:
+        if (epochidx + 1) % args.preprint == 0 or epochidx == epoch - 1:
             start_time1 = time.time()
             print('测试')
             test_loss = 0

@@ -1,0 +1,81 @@
+# Python caches and build products
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+/build/
+/dist/
+
+# Local Conda and virtual environments (keep lightweight environment configs)
+.venv/
+venv/
+env/
+envs/
+.conda/
+/conda-meta/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+.secrets/
+.ssh/
+.netrc
+.git-credentials
+credentials.json
+credentials.local.*
+secrets.json
+secrets.yaml
+secrets.yml
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local datasets; dataset/ contains SOURCE CODE and must remain tracked
+/data/
+/datasets/
+/data_local/
+
+# Weights: model/ is OUTPUT; models/ and model.py contain SOURCE CODE
+/pretrained/
+/model/
+/checkpoint/
+/checkpoints/
+/weights/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+
+# Generated training results
+/log/
+/logs/
+/plot/
+/runs/
+/results/
+/outputs/
+/ray_results/
+/ray_tmp/
+/ray_session/
+session_*/
+events.out.tfevents.*
+*.log
+*.npy
+*.npz
+# Curated Markdown, JSON and CSV evidence belongs in docs/ with explicit git add.
+# Existing tracked upstream materials are unaffected by ignore rules.
+
+# Local editor and temporary files
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+*.swo
+*~
+.ipynb_checkpoints/

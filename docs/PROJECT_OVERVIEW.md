@@ -64,7 +64,7 @@ CUDA、PyTorch、Ray 的可运行性来自用户既有验证；本轮只做静�
 
 | 编号 / 优先级 | 已知问题与下一目标 |
 | --- | --- |
-| GIT-01 / P0 | 干净分支发布已获确认，正在执行；旧的大型实验历史仅保留本地 |
+| GIT-01 / 已完成 | 干净分支已推送至个人 Fork main 并核验；旧的大型实验历史仅保留本地 |
 | DP-01 / P0 | 严格裁剪上界、Gaussian 噪声分布及缩放测试尚缺 |
 | DP-02 / P0 | 客户端选择、样本加载、跨客户端样本复用与会计采样假设尚未对应 |
 | DP-03 / P0 | 邻接定义、保护单位、组合步数、delta 及隐私会计尚未验收 |
@@ -75,9 +75,9 @@ CUDA、PyTorch、Ray 的可运行性来自用户既有验证；本轮只做静�
 
 ## Git 状态与发布方案
 
-检查时当前分支 `reproduce-local`，既有源码归档 commit 为 `417b359c75bb57134b9baa1879484b87ba17f519`；其他本地分支 `main`、`reproduction/local-8gb` 保留。`origin` 的 fetch 地址为 `https://github.com/PPEE523/LA-LORA-Reproduction.git`；本轮确认现有 SSH 身份及仓库读取可用后，将其 push 地址配置为 `git@github.com:PPEE523/LA-LORA-Reproduction.git`。`upstream` 的 fetch/push 均保留为 `https://github.com/junkangLiu0/LA-LORA.git`。
+当前开发分支为 `reproduction/managed`，跟踪 `origin/main`。初始化时的 `reproduce-local` 保留在管理提交 `1a43153fd26b03659b7bec8642db17fea5d9ce47`，其祖先含既有源码归档 `417b359c75bb57134b9baa1879484b87ba17f519`；其他本地分支 `main`、`reproduction/local-8gb` 仍保留在官方基准。`origin` 的 fetch 地址为 `https://github.com/PPEE523/LA-LORA-Reproduction.git`，push 地址为 `git@github.com:PPEE523/LA-LORA-Reproduction.git`。`upstream` 的 fetch/push 均保留为 `https://github.com/junkangLiu0/LA-LORA.git`。
 
-首次本地管理提交为 `1a43153fd26b03659b7bec8642db17fea5d9ce47`，保留在 `reproduce-local`。用户已明确确认发布到现有个人 Fork 的 `main`，并同意独立干净发布分支方案，无需再次询问。发布前远端 `main` 为官方上述 SHA；本阶段正在构造发布快照并执行核验，实际推送结果见 REPRO_STATUS 与 CODE_CHANGES 的最新记录。
+用户已明确确认发布到现有个人 Fork 的 `main`，并同意独立干净发布分支方案。首次发布快照 `dd50765c63377aeafeb29e916656082a49e24e7e` 已通过 SSH 普通快进推送，远端默认分支为 `main`；GitHub API 验证其 55 个文件的路径、mode 和 blob ID 与本地完全一致。首次发布树为 `0553396dd39e28c225b046c65d0d9819afa17ffd`，共 2,622,925 bytes（约 2.50 MiB），最大文件为上游原有 `data/cola/train.csv`（1,213,192 bytes）。本地旧分支及原有 91 个文件的大小和 SHA-256 均保持不变。后续管理验证记录随单独的 docs 提交更新；最新 SHA 用 `git log -1 --format='%H %s'` 或 GitHub main 的最近提交查看。
 
 ### 已跟踪文件审计
 
@@ -99,14 +99,14 @@ CUDA、PyTorch、Ray 的可运行性来自用户既有验证；本轮只做静�
 git ls-tree -rl 417b359 -- model/ pretrained/ data/cifar-100-python data/cifar-100-python.tar.gz
 ```
 
-### 已确认的发布方案
+### 已执行的发布方案
 
 1. 保留 `reproduce-local`、`417b359` 及其全部后续本地提交、所有其他分支与本地数据实物。
 2. 在同一仓库创建本地 `reproduction/managed`，以已核验的官方 `578e492...` 为父提交；纳入经清单审核的当前源码、测试和管理文档，共 55 个文件。9 个既有源码/编辑器配置路径逐一保持原 blob 不变；本轮只编辑管理文档。不把含大型对象的 `417b359` 作为其祖先。
 3. 发布快照保留全部官方原有源码和轻量实验材料，包括原有 `data/cola/`、示例图、示例日志及上游历史；不加入本地新生成的数据、权重、缓存和运行产物。不直接删除或取消跟踪当前分支的已有文件。
 4. 使用独立索引构造快照，切换开发分支时仅更新 Git 分支/索引，保持工作区文件实物不变；不重新克隆、不创建仓库副本。发布树排除 43 个本地生成文件；切换前后对原有 91 个文件比对 SHA-256 和大小。
 5. 将干净发布分支以普通快进方式推送到已获确认的个人 Fork `main`，让默认页面包含最新源码和文档；不覆盖官方 upstream，不强推，不推送全部本地分支。若远端已前进，先停止并重新检查差异。
-6. 核验远端 SHA、树与本地发布快照一致，并扫描发布树和所有新增历史对象中的大文件、敏感信息。原本地分支保留作溯源，不再用于日常推送；从 `reproduction/managed` 继续工作。
+6. 已核验远端 SHA、树与本地发布快照一致；扫描首次发布所有可达历史的 64 个 blob（含 11 个二进制对象），没有超过 10 MiB 的对象，常见敏感模式无匹配。原本地分支保留作溯源，不再用于日常推送；从 `reproduction/managed` 继续工作。
 
 该方案保留现有本地历史与官方祖先历史；个人 Fork 将以新的干净提交归档本地源码，不上传旧的大文件提交。若要求个人 Fork 也包含 `417b359` 的完整历史，则与“不上传大型实验文件、不重写历史”冲突，需另行决定，不能用强推解决。
 

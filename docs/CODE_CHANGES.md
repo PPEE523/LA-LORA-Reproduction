@@ -42,14 +42,27 @@
 ## 2026-10-21：按确认方案构造干净发布分支
 
 - 分类：仓库管理配置 / 测试及文档修改（`setup:`）。用户已明确确认目标为现有公开 Fork `PPEE523/LA-LORA-Reproduction` 的 `main`。
-- 对应 Git commit：包含本条的 `setup: publish clean reproduction snapshot`，可用 `git log --format='%H %s' --grep='^setup: publish clean reproduction snapshot$'` 定位。
+- 对应 Git commit：`dd50765c63377aeafeb29e916656082a49e24e7e`，`setup: publish clean reproduction snapshot`，父提交为官方基准。
 - 修改文件：AGENTS.md、PROJECT_OVERVIEW、REPRO_STATUS、CODE_CHANGES、REPRO_CHECKLIST，更新确认状态、开发分支与后续命令。EXPERIMENT_LOG 没有新增科研实验。
 - 发布清单：以官方 `578e49278e731f26d12457dbc3e4bec89d017a3c` 的完整树为基础，覆盖当前 9 个源码/轻量配置路径及 7 个管理文件，得到 55 文件发布树。9 路径为 `.vscode/settings.json`、`DP_lora.py`、`dirichlet_data.py`、`dp_per_sample.py`、`patch_local.py`、`ray_worker_loader.py`、`test_dp_per_sample.py`、`test_gaussian_filter.py`、`verify_pretrained.py`；它们与原有本地归档内容保持一致。
 - 排除内容：43 个本地新增数据、权重、缓存、训练日志、npy 曲线与 TensorBoard 事件。原有官方轻量数据/示例图/日志和上游历史保留。
 - 是否改变论文算法定义：否。只转存已有源码 blob，不编辑源码、DP 或训练配置。
-- 历史与实物保护：reproduce-local 保持在 `1a43153`；其他旧分支保持原值。切换只更新分支与索引，排除文件留在原路径；切换前已记录原有 91 文件的 SHA-256 与大小，切换后逐个比较。
+- 历史与实物保护：reproduce-local 保持在 `1a43153`；其他旧分支保持原值。切换只更新分支与索引，排除文件留在原路径；切换前后原有 91 文件的 SHA-256 与大小逐个比较通过。
 - 验证范围：管理文档、忽略规则、文件清单、源码 blob、完整可达历史的大文件与敏感模式扫描；不运行训练或科研单测。
-- 发布状态：已获授权，正在执行；实际推送 SHA 与远端验证结果后续追加。
+- 发布状态：已成功普通快进推送到个人 Fork main，具体验证见下条。
+
+## 2026-10-21：首次推送后验证与交接
+
+- 分类：测试及文档修改（`docs:`）。对应 commit 为包含本条的 `docs: record verified GitHub publication`，用 `git log -1 --format='%H %s' -- docs/CODE_CHANGES.md` 定位。
+- 修改文件：PROJECT_OVERVIEW、REPRO_STATUS、CODE_CHANGES、REPRO_CHECKLIST；将发布阶段更新为完成，保留初次本地准备时的历史记录。没有新增实验，EXPERIMENT_LOG 不变。
+- 实际推送命令：`git -c core.sshCommand='ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes' push -u origin reproduction/managed:main`。
+- 结果：`578e492..dd50765 reproduction/managed -> main`，退出码 0；本地 reproduction/managed 已跟踪 origin/main。
+- 远端核验：GitHub branches API 确认 main 为 `dd50765c63377aeafeb29e916656082a49e24e7e`；递归 tree API 返回树 `0553396dd39e28c225b046c65d0d9819afa17ffd`，55 个文件的路径/mode/blob ID 与本地完全一致，未截断。
+- 文件体积：首次发布树 2,622,925 bytes，最大文件为官方 `data/cola/train.csv` 的 1,213,192 bytes。保留官方原有轻量实验材料，没有加入本地 CIFAR 或权重。
+- 全历史检查：发布谱系所有 64 个可达 blob 均已扫描（含 11 个二进制对象），无超过 10 MiB 的对象，私钥/常见 Token/凭据 URL/硬编码敏感赋值规则无匹配；该结论为规则检查结果。
+- 保护检查：原有 91 个文件共 1,034,836,336 bytes，切换前后 SHA-256 和大小完全一致。旧本地分支全部保留；`417b359` 不是发布分支祖先，官方 `578e492` 是祖先。临时独立索引已清理，没有复制仓库。
+- 是否改变论文算法定义 / 实验影响：否；原源码、DP 与训练配置不变。没有运行科研单测、训练或 GPU 实验。
+- 本次验证记录提交后，再普通推送本分支至同一 origin/main，并复核最终远端 SHA 与树，保持默认分支可直接审查。
 
 ## 既有本地代码快照（追溯登记）
 
